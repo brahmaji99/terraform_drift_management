@@ -10,4 +10,8 @@ variable "bucket_name" {
   default     = "terraform-demo-bucket-ai2026"
 }
 
-
+variable "ami_id" {
+  description = "Amazon Linux 2 AMI ID"
+  type        = string
+  default     = "ami-02781fbdc79017564"
+}
