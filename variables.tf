@@ -1,13 +1,18 @@
 variable "aws_region" {
-  default = "eu-north-1"
+  description = "AWS region to deploy resources"
+  type        = string
+  default     = "eu-north-1"
 }
 
 variable "bucket_name" {
-  default = "terraform-drift-demo-ai2026"
+  description = "Name of the demo S3 bucket"
+  type        = string
+  default     = "terraform-demo-bucket-ai2026"
 }
 
 variable "ami_id" {
-  description = "Amazon Linux AMI"
+  description = "Amazon Linux 2 AMI ID"
   type        = string
   default     = "ami-08d26f9b5f60f8f95"
 }
+
