@@ -8,4 +8,6 @@ variable "bucket_name" {
 
 variable "ami_id" {
   description = "Amazon Linux AMI"
+  type        = string
+  default     = "ami-08d26f9b5f60f8f95"
 }
