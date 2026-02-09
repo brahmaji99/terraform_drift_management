@@ -41,33 +41,29 @@ pipeline {
         }
 
         // ✅ Drift Check BEFORE Apply
-        stage('Terraform Drift Check') {
+       stage('Terraform Drift Check') {
             steps {
                 sh '''
-                  echo "🔍 Checking for drift against current state..."
-                  
-                  # Refresh the state
-                  terraform refresh
+                echo "🔍 Checking for drift..."
 
-                  # Generate a drift plan
-                  terraform plan -detailed-exitcode -out=tfdriftplan -no-color || true
+                terraform plan -detailed-exitcode -no-color -out=tfdriftplan
+                exit_code=$?
 
-                  # Export drift plan to JSON
-                  terraform show -json tfdriftplan > drift-report.json
+                terraform show -json tfdriftplan > drift-report.json
 
-                  # Check exit code to detect drift
-                  drift_exit_code=$?
-                  if [ "$drift_exit_code" -eq 2 ]; then
-                    echo "⚠️ Drift detected! See drift-report.json for details"
-                  elif [ "$drift_exit_code" -eq 0 ]; then
+                if [ "$exit_code" -eq 2 ]; then
+                    echo "⚠️ Drift detected! Blocking apply."
+                    exit 1
+                elif [ "$exit_code" -eq 0 ]; then
                     echo "✅ No drift detected"
-                  else
-                    echo "❌ Error during drift check"
-                    exit $drift_exit_code
-                  fi
+                else
+                    echo "❌ Terraform error"
+                    exit $exit_code
+                fi
                 '''
             }
         }
+
 
 
         stage('Terraform Apply') {
