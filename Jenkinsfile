@@ -55,7 +55,7 @@ pipeline {
         stage('Generate Drift Summary JSON') {
             steps {
                 sh '''
-                DRIFT=$(cat drift.env | cut -d= -f2)
+                DRIFT=$(grep DRIFT_DETECTED drift.env | cut -d= -f2)
 
                 cat drift.json | jq --arg drift "$DRIFT" '{
                   job_name: "terraform-nightly-drift",
@@ -66,34 +66,53 @@ pipeline {
                     change: ([.resource_changes[] | select(.change.actions | index("update"))] | length),
                     destroy: ([.resource_changes[] | select(.change.actions | index("delete"))] | length)
                   },
-                  resources: [
-                    .resource_changes[] | {
-                      address: .address,
-                      type: .type,
-                      actions: .change.actions
-                    }
-                  ]
+                  resources: (if .resource_changes then [.resource_changes[] | {
+                    address: .address,
+                    type: .type,
+                    actions: .change.actions
+                  }] else [] end)
                 }' > drift-summary.json
                 '''
             }
         }
 
         stage('Analyze Drift with Bedrock (Lambda)') {
+            when {
+                expression { readFile('drift.env').trim() == 'DRIFT_DETECTED=true' }
+            }
             steps {
                 sh '''
                 echo "🤖 Sending drift JSON to Amazon Bedrock via Lambda..."
 
                 aws lambda invoke \
-                --function-name terraform-drift-bedrock-analyzer \
-                --payload file://drift-summary.json \
-                --cli-binary-format raw-in-base64-out \
-                bedrock-response.json
+                  --function-name terraform-drift-bedrock-analyzer \
+                  --payload file://drift-summary.json \
+                  --cli-binary-format raw-in-base64-out \
+                  bedrock-response.json
 
                 echo "📄 Bedrock response:"
                 cat bedrock-response.json
+
+                # Optional: fail pipeline if Lambda returns error
+                if grep -q '"FunctionError"' bedrock-response.json; then
+                  echo "❌ Bedrock Lambda returned an error"
+                  exit 1
+                fi
                 '''
             }
         }
+    }
 
+    post {
+        always {
+            archiveArtifacts artifacts: 'drift.json, drift-summary.json, bedrock-response.json', fingerprint: true
+            echo "🔹 Terraform drift analysis completed."
+        }
+        success {
+            echo "✅ Pipeline completed successfully."
+        }
+        failure {
+            echo "❌ Pipeline failed."
+        }
     }
 }
