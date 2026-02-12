@@ -16,98 +16,84 @@ pipeline {
 
         stage('Terraform Init') {
             steps {
-                sh '''
-                  terraform init -upgrade
-                '''
+                sh 'terraform init -upgrade'
             }
         }
 
         stage('Terraform Validate') {
             steps {
-                sh '''
-                  terraform validate
-                '''
+                sh 'terraform validate'
             }
         }
 
-        stage('Terraform Plan') {
+        stage('Terraform Drift Check') {
             steps {
                 sh '''
-                  terraform plan \
-                    -no-color \
-                    -out=tfplan
-                '''
-            }
-        }
+                echo "🔍 Checking for Terraform drift..."
 
-        // ✅ Drift Check BEFORE Apply
-       stage('Terraform Drift Check') {
-            steps {
-                sh '''
-                echo "🔍 Checking for drift..."
-
+                set +e
                 terraform plan -detailed-exitcode -no-color -out=tfdriftplan
-                exit_code=$?
+                EXIT_CODE=$?
+                set -e
 
-                terraform show -json tfdriftplan > drift-report.json
+                terraform show -json tfdriftplan > drift.json
 
-                if [ "$exit_code" -eq 2 ]; then
-                    echo "⚠️ Drift detected! Blocking apply."
-                    exit 1
-                elif [ "$exit_code" -eq 0 ]; then
-                    echo "✅ No drift detected"
+                if [ "$EXIT_CODE" -eq 2 ]; then
+                  echo "⚠️ Drift detected"
+                  echo "DRIFT_DETECTED=true" > drift.env
+                elif [ "$EXIT_CODE" -eq 0 ]; then
+                  echo "✅ No drift detected"
+                  echo "DRIFT_DETECTED=false" > drift.env
                 else
-                    echo "❌ Terraform error"
-                    exit $exit_code
+                  echo "❌ Terraform error"
+                  exit $EXIT_CODE
                 fi
                 '''
             }
         }
 
-        stage('Send Drift to Power Automate') {
+        stage('Generate Drift Summary JSON') {
             steps {
                 sh '''
-                jq -n \
-                    --arg job "$JOB_NAME" \
-                    --arg build "$BUILD_NUMBER" \
-                    --arg env "prod" \
-                    --arg time "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-                    --slurpfile drift drift-report.json \
-                    '{
-                    job_name: $job,
-                    build_number: $build,
-                    environment: $env,
-                    timestamp: $time,
-                    drift_summary: $drift[0]
-                    }' > payload.json
+                DRIFT=$(cat drift.env | cut -d= -f2)
 
-                curl -X POST \
-                    -H "Content-Type: application/json" \
-                    --data @payload.json \
-                    https://default189de737c93a4f5a8b686f4ca99419.12.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/534ab24c778143bd8a7afa946eecb2f6/triggers/manual/paths/invoke?api-version=1
+                cat drift.json | jq --arg drift "$DRIFT" '{
+                  job_name: "terraform-nightly-drift",
+                  environment: "dev",
+                  drift_detected: ($drift == "true"),
+                  summary: {
+                    add: ([.resource_changes[] | select(.change.actions | index("create"))] | length),
+                    change: ([.resource_changes[] | select(.change.actions | index("update"))] | length),
+                    destroy: ([.resource_changes[] | select(.change.actions | index("delete"))] | length)
+                  },
+                  resources: [
+                    .resource_changes[] | {
+                      address: .address,
+                      type: .type,
+                      actions: .change.actions
+                    }
+                  ]
+                }' > drift-summary.json
                 '''
             }
         }
 
-
-
-        stage('Terraform Apply') {
+        stage('Analyze Drift with Bedrock (Lambda)') {
             steps {
                 sh '''
-                  terraform apply \
-                    -auto-approve \
-                    tfplan
+                echo "🤖 Sending drift JSON to Amazon Bedrock via Lambda..."
+
+                aws lambda invoke \
+                --function-name terraform-drift-bedrock-analyzer \
+                --payload file://drift-summary.json \
+                --cli-binary-format raw-in-base64-out \
+                bedrock-response.json
+
+                echo "📄 Bedrock response:"
+                cat bedrock-response.json
                 '''
             }
         }
-    }
 
-    post {
-        success {
-            echo "✅ Terraform resources provisioned successfully"
-        }
-        failure {
-            echo "❌ Terraform apply failed"
-        }
     }
 }
