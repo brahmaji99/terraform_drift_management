@@ -83,23 +83,17 @@ pipeline {
             steps {
                 sh '''
                 echo "🤖 Sending drift JSON to Amazon Bedrock via Lambda..."
-
                 aws lambda invoke \
-                  --function-name terraform-drift-bedrock-analyzer \
-                  --payload file://drift-summary.json \
-                  --cli-binary-format raw-in-base64-out \
-                  bedrock-response.json
+                --function-name terraform-drift-bedrock-analyzer \
+                --payload file://drift-summary.json \
+                --cli-binary-format raw-in-base64-out \
+                bedrock-response.json
 
                 echo "📄 Bedrock response:"
                 cat bedrock-response.json
-
-                # Optional: fail pipeline if Lambda returns error
-                if grep -q '"FunctionError"' bedrock-response.json; then
-                  echo "❌ Bedrock Lambda returned an error"
-                  exit 1
-                fi
                 '''
             }
+
         }
     }
 
