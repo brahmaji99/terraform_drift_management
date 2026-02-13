@@ -91,6 +91,12 @@ pipeline {
 
                 echo "📄 Bedrock response:"
                 cat bedrock-response.json
+                # Check if the Lambda returned an error
+                    if grep -q '"statusCode": 500' bedrock-response.json; then
+                        echo "❌ Bedrock Lambda returned an error:"
+                        cat bedrock-response.json
+                        exit 1
+                    fi
                 '''
             }
 
