@@ -101,6 +101,19 @@ pipeline {
             }
 
         }
+        stage('Extract AI Drift Analysis') {
+            steps {
+                sh '''
+                echo "🧠 Extracting AI analysis..."
+
+                jq -r '.analysis.output.message.content[0].text' bedrock-response.json > drift-ai-report.txt
+
+                echo "📄 AI Drift Report:"
+                cat drift-ai-report.txt
+                '''
+            }
+        }
+
     }
 
     post {
